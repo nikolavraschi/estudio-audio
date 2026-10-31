@@ -11,19 +11,23 @@ elegí fragmentos de cada uno, ordenalos y exportá un único audio continuo.
 - **Efectos por fragmento** (tecla `E`): ecualizador (graves/medios/agudos), tono más grave/agudo,
   velocidad, quitar ruido y zumbido, y efectos especiales (eco, catedral, teléfono, radio, robot,
   alien, coro, 8-bit, al revés…).
+- **Voz VERA** (tecla `V`): transforma la voz de un fragmento con un preset de VERA
+  (ver `../vera`). Crea un audio nuevo «(VERA)» en `fragmentos_vera/`; el original no se toca.
 - Exporta a WAV, MP3, M4A, OGG Opus y FLAC.
 - Proyectos `.amix` para seguir después.
 
 ## Instalación
 
-Requiere Python 3.10+.
+Forma parte del **Estudio de audio**: se instala con `instalar.bat` de la carpeta de arriba
+(un solo entorno `.venv` para VERA y Audio Mixer) y se abre con `abrir_estudio.bat`
+o con `Audio Mixer.bat` de esta carpeta.
+
+A mano:
 
 ```
 pip install -r requirements.txt
 python audio_mixer.py
 ```
-
-En Windows también se puede abrir con `Audio Mixer.bat`.
 
 No hace falta instalar ffmpeg aparte: viene con `imageio-ffmpeg`.
 
@@ -36,6 +40,7 @@ No hace falta instalar ffmpeg aparte: viene con `imageio-ffmpeg`.
 | Ctrl+Espacio | Escuchar la mezcla |
 | S | Cortar bloque en la línea amarilla |
 | E | Efectos del fragmento elegido |
+| V | Voz VERA del fragmento elegido |
 | Supr | Borrar fragmento |
 | Ctrl+Z / Ctrl+Y | Deshacer / rehacer |
 | Ctrl+S | Guardar proyecto |
