@@ -1,4 +1,2 @@
-PySide6
-numpy
-sounddevice
-imageio-ffmpeg
+# Las librerías están en el archivo de la carpeta de arriba (un solo entorno para todo el estudio).
+-r ../requirements.txt
