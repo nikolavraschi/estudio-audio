@@ -9,3 +9,7 @@ __pycache__/
 salida/
 desktop.ini
 Thumbs.db
+config_local.json
+errores.log
+tomas/
+pruebas/

@@ -1067,6 +1067,98 @@ class FxDialog(QDialog):
         self.preview(dict(self.fx))
 
 
+
+# ----------------------------------------------------------------------------- puente con VERA
+
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+VERA_DIR = os.path.join(ROOT_DIR, "vera")
+VERA_FRAG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fragmentos_vera")
+_vera = None
+
+
+def vera_core():
+    """Carga el núcleo de VERA (../vera) la primera vez que se usa.
+
+    Si VERA o sus librerías no están, el Mixer funciona igual: solo falla esta opción.
+    """
+    global _vera
+    if _vera is None:
+        if not os.path.isdir(VERA_DIR):
+            raise RuntimeError(f"No encuentro la carpeta de VERA:\n{VERA_DIR}")
+        if VERA_DIR not in sys.path:
+            sys.path.insert(0, VERA_DIR)
+        import preset_store
+        from engines.base import resample
+        _vera = (preset_store, resample)
+    return _vera
+
+
+def vera_transform(seg, preset):
+    """Pasa un fragmento estéreo 44.1 kHz por VERA (que trabaja en mono 48 kHz).
+
+    Devuelve audio estéreo 44.1 kHz con exactamente el mismo largo.
+    """
+    preset_store, resample = vera_core()
+    mono = seg.mean(axis=1).astype(np.float64)
+    y, _ = preset_store.transform(resample(mono, SR, 48000), 48000, preset)
+    y = resample(y, 48000, SR)[: len(mono)]
+    y = np.pad(y, (0, len(mono) - len(y))).astype(np.float32)
+    return np.repeat(y[:, None], CH, axis=1)
+
+
+class VeraWorker(QObject):
+    done = Signal(object, object, str, str)   # fragmento, audio, ruta, error
+
+    def run(self, frag, preset, path):
+        def work():
+            try:
+                import soundfile as sf
+                data = vera_transform(frag.src.data[frag.a:frag.b], preset)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                sf.write(path, data, SR, subtype="PCM_24")
+                self.done.emit(frag, data, path, "")
+            except Exception as ex:
+                self.done.emit(frag, None, path, f"{type(ex).__name__}: {ex}")
+        threading.Thread(target=work, daemon=True).start()
+
+
+def launch_vera():
+    script = os.path.join(VERA_DIR, "app.py")
+    if not os.path.isfile(script):
+        raise RuntimeError(f"No encuentro VERA en {script}")
+    exe = sys.executable
+    if os.name == "nt" and os.path.isfile(os.path.join(os.path.dirname(exe), "pythonw.exe")):
+        exe = os.path.join(os.path.dirname(exe), "pythonw.exe")
+    subprocess.Popen([exe, script], cwd=VERA_DIR, creationflags=NOWIN)
+
+
+class VeraDialog(QDialog):
+    """Elegir con qué preset de VERA transformar el fragmento."""
+
+    def __init__(self, parent, names):
+        super().__init__(parent)
+        self.setWindowTitle("Voz VERA")
+        v = QVBoxLayout(self)
+        v.addWidget(QLabel("Transforma la voz del fragmento con un preset de VERA.\n"
+                           "Se crea un audio nuevo «(VERA)» y el fragmento pasa a usarlo;\n"
+                           "el original queda intacto y se puede deshacer con Ctrl+Z."))
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Preset:"))
+        self.combo = QComboBox()
+        self.combo.addItems(names)
+        row.addWidget(self.combo, 1)
+        v.addLayout(row)
+        btns = QHBoxLayout()
+        btns.addStretch(1)
+        ok, cancel = QPushButton("Transformar"), QPushButton("Cancelar")
+        ok.setObjectName("primary")
+        ok.clicked.connect(self.accept)
+        cancel.clicked.connect(self.reject)
+        btns.addWidget(ok)
+        btns.addWidget(cancel)
+        v.addLayout(btns)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1080,6 +1172,9 @@ class MainWindow(QMainWindow):
         self.player = Player()
         self.loader = Loader()
         self.loader.done.connect(self.on_loaded)
+        self.vera = VeraWorker()
+        self.vera.done.connect(self.on_vera_done)
+        self.vera_busy = False
         self.pending = 0
         self.mix_offsets = []
 
@@ -1283,6 +1378,9 @@ class MainWindow(QMainWindow):
         act(m, "Rehacer", self.redo, "Ctrl+Y")
         m.addSeparator()
         act(m, "Efectos del fragmento…", lambda: self.open_fx(self.seq.sel), "E")
+        act(m, "Voz VERA del fragmento…", lambda: self.vera_fragment(self.seq.sel), "V")
+        m = self.menuBar().addMenu("E&studio")
+        act(m, "Abrir VERA (transformador de voz)", self.open_vera)
         m = self.menuBar().addMenu("A&yuda")
         act(m, "Cómo se usa", self.show_help, "F1")
         act(None, "play", self.toggle_play_editor, "Space")
@@ -1306,6 +1404,7 @@ class MainWindow(QMainWindow):
             "   Ctrl+Espacio con la línea amarilla puesta reproduce desde ahí.\n"
             "   E (o «🎛 Efectos…») = ecualizador, más grave/agudo, más rápido/lento, quitar ruido "
             "y efectos (eco, robot, teléfono...) para el fragmento elegido.\n"
+            "   V (o «🎙 Voz VERA…») = transforma la voz del fragmento con un preset de VERA.\n"
             "5. Ctrl+Espacio = escuchar todo junto. «Exportar audio…» guarda el resultado "
             "(wav, mp3, m4a, ogg, flac).\n\n"
             "Rueda del mouse = zoom · Shift+rueda = desplazar · Ctrl+Z = deshacer · "
@@ -1658,6 +1757,7 @@ class MainWindow(QMainWindow):
             m.addAction("▶ Escuchar desde acá", lambda: self.play_frags(self.frags[i:]))
             m.addAction("✎ Editar (ver en la onda)", lambda: self.edit_fragment(i))
             m.addAction("🎛 Efectos y ecualizador…", lambda: self.open_fx(i))
+            m.addAction("🎙 Voz VERA…", lambda: self.vera_fragment(i))
             m.addAction("⧉ Duplicar", lambda: self.duplicate_fragment(i))
             if self.valid_cut():
                 m.addSeparator()
@@ -1671,6 +1771,66 @@ class MainWindow(QMainWindow):
             m.addAction("Vaciar mezcla", self.clear_frags)
         if not m.isEmpty():
             m.exec(pos)
+
+    def open_vera(self):
+        try:
+            launch_vera()
+        except Exception as ex:
+            QMessageBox.critical(self, "VERA", str(ex))
+
+    def vera_fragment(self, i):
+        if not (0 <= i < len(self.frags)):
+            self.statusBar().showMessage("Elegí primero un fragmento de la mezcla (abajo).", 4000)
+            return
+        if self.vera_busy:
+            self.statusBar().showMessage("VERA ya está transformando otro fragmento…", 4000)
+            return
+        try:
+            preset_store = vera_core()[0]
+            names = preset_store.list_presets()
+        except Exception as ex:
+            QMessageBox.critical(self, "VERA no disponible",
+                                 f"No pude cargar VERA:\n{ex}\n\nCorré instalar.bat en la carpeta del estudio.")
+            return
+        if not names:
+            QMessageBox.information(self, "VERA", "No hay presets. Creá uno en VERA con «Guardar como…».")
+            return
+        dlg = VeraDialog(self, names)
+        if not dlg.exec():
+            return
+        name = dlg.combo.currentText()
+        try:
+            preset = preset_store.load_preset(name)
+        except Exception as ex:
+            QMessageBox.critical(self, "VERA", f"No pude leer el preset «{name}»:\n{ex}")
+            return
+        f = self.frags[i]
+        safe = preset_store.safe_name(f"{f.src.name}_{fmt_time(f.a / SR).replace(':', 'm')}_{name}")
+        path = os.path.join(VERA_FRAG_DIR, f"{safe}.wav")
+        n = 2
+        while os.path.exists(path):
+            path = os.path.join(VERA_FRAG_DIR, f"{safe}_{n}.wav")
+            n += 1
+        self.vera_busy = True
+        QApplication.setOverrideCursor(Qt.BusyCursor)
+        self.statusBar().showMessage(f"VERA: transformando «{f.src.name}» con «{name}»…")
+        self.vera.run(f, preset, path)
+
+    def on_vera_done(self, frag, data, path, err):
+        self.vera_busy = False
+        QApplication.restoreOverrideCursor()
+        if err:
+            self.statusBar().clearMessage()
+            QMessageBox.critical(self, "VERA", f"No se pudo transformar el fragmento:\n{err}")
+            return
+        src = AudioSource(path, data, f"{frag.src.name} (VERA)")
+        self.add_source(src)
+        if frag in self.frags:
+            self.push_undo()
+            j = self.frags.index(frag)
+            self.frags[j] = Fragment(src, 0, len(data), frag.gain_db, frag.fx)
+            self.refresh()
+        self.statusBar().showMessage(f"Listo: el fragmento ahora usa «{src.name}» (Ctrl+Z para volver).", 6000)
 
     def clear_frags(self):
         self.push_undo()

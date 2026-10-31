@@ -1,0 +1,22 @@
+{
+  "engine": "praat",
+  "params": {
+    "formant_ratio": 1.17,
+    "pitch_median": 210.0,
+    "pitch_range": 1.1
+  },
+  "post": {
+    "hpf_on": true,
+    "hpf_hz": 90.0,
+    "eq_on": true,
+    "eq_hz": 3000.0,
+    "eq_db": 2.0,
+    "deess_on": true,
+    "deess_hz": 6000.0,
+    "deess_max_db": 6.0,
+    "comp_on": true,
+    "comp_ratio": 2.0,
+    "loud_on": true,
+    "loud_lufs": -23.0
+  }
+}
