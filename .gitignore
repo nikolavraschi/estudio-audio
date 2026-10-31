@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+*.wav
+*.mp3
+*.flac
+*.pth
+*.index
+salida/
+desktop.ini
+Thumbs.db
