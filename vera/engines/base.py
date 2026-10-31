@@ -28,6 +28,8 @@ class VoiceEngine:
     name: str = ""
     description: str = ""
     params: tuple = ()
+    # Motores lentos (RVC) no se reprocesan solos al mover un slider.
+    slow: bool = False
 
     def is_available(self):
         """Devuelve (disponible, motivo_si_no)."""

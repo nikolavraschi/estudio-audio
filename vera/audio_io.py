@@ -155,3 +155,73 @@ class ABPlayer:
             finished = not self.loop and self.pos >= n
         if finished:
             raise sd.CallbackStop
+
+
+class Recorder:
+    """Graba del micrófono (Fase 2). Guarda bloques en memoria y mide el nivel en vivo."""
+
+    MAX_S = 600  # tope de seguridad: 10 minutos por toma
+
+    def __init__(self):
+        self.device = None
+        self.stream = None
+        self.stream_sr = SR
+        self._blocks = []
+        self._frames = 0
+        self.level_db = -120.0   # nivel del último bloque (para el vúmetro)
+        self.peak_hold_db = -120.0  # pico más alto de la toma (para avisar si saturó)
+        self.lock = threading.Lock()
+
+    @property
+    def recording(self):
+        return self.stream is not None and self.stream.active
+
+    def elapsed_s(self):
+        return self._frames / self.stream_sr
+
+    def start(self, device):
+        self.stop()
+        self.device = device
+        self._blocks, self._frames = [], 0
+        self.level_db = self.peak_hold_db = -120.0
+        info = sd.query_devices(device, "input")
+        try:
+            sr = SR
+            stream = sd.InputStream(device=device, samplerate=sr, channels=1, dtype="float32",
+                                    callback=self._callback)
+        except Exception:
+            # Igual que en la salida: algunos micrófonos (WASAPI) solo aceptan su frecuencia.
+            sr = int(info["default_samplerate"])
+            stream = sd.InputStream(device=device, samplerate=sr, channels=1, dtype="float32",
+                                    callback=self._callback)
+        self.stream_sr = sr
+        self.stream = stream
+        stream.start()
+
+    def _callback(self, indata, frames, time_info, status):
+        block = indata[:, 0].copy()
+        with self.lock:
+            self._blocks.append(block)
+            self._frames += frames
+        peak = float(np.max(np.abs(block))) if len(block) else 0.0
+        self.level_db = 20 * np.log10(peak + 1e-9)
+        self.peak_hold_db = max(self.peak_hold_db, self.level_db)
+        if self._frames >= self.MAX_S * self.stream_sr:
+            raise sd.CallbackStop
+
+    def stop(self):
+        """Para la grabación y devuelve el audio a 48 kHz (o None si no había nada)."""
+        if self.stream is None:
+            return None
+        try:
+            self.stream.stop()
+            self.stream.close()
+        except Exception:
+            pass
+        self.stream = None
+        with self.lock:
+            blocks, self._blocks = self._blocks, []
+        if not blocks:
+            return None
+        audio = np.concatenate(blocks).astype(np.float64)
+        return resample(audio, self.stream_sr, SR)

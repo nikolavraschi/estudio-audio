@@ -1,34 +1,46 @@
-# Cómo se conectaría un motor RVC (no implementado todavía)
+# Motor RVC (Applio) — Fase 5
 
 RVC convierte tu voz usando un **modelo entrenado** con grabaciones de una voz femenina real
 (con permiso de esa persona). Suele ser el salto de calidad más grande, pero exige un modelo
 `.pth` (y opcionalmente un `.index`).
 
-## Dónde va
-`engines/rvc_applio.py` ya tiene la clase `RvcApplioEngine` con sus sliders
-(transposición, index rate, protect). Hoy aparece en el menú como “próximamente” y no se puede usar.
+## 1. Instalar Applio (aparte)
+Applio tiene su propio Python y no se mezcla con el `.venv` del estudio.
+Instalalo siguiendo su página (https://applio.org). Queda una carpeta con `core.py`
+y, en Windows, `env\python.exe`.
 
-Todo motor cumple el contrato de `engines/base.py`:
-```python
-def process(self, audio, sr, params) -> audio   # mono float, misma duración exacta
+## 2. Conectarlo en VERA
+1. Botón **Configurar RVC…** (arriba a la derecha, en *2. Preset, motor y voz*).
+2. Elegí:
+   - **Carpeta de Applio**: la que tiene `core.py`.
+   - **Modelo (.pth)** y, si lo tenés, el **índice (.index)**.
+   - *Python de Applio*: dejalo vacío; VERA busca `env\python.exe` solo. Solo hace falta si
+     Applio está instalado de otra forma.
+   - *Detector de tono*: `rmvpe` es el recomendado.
+3. **Revisar** muestra si falta algo. **Guardar** lo deja en `config_local.json`
+   (son rutas de tu PC, por eso no se sube a git).
+4. Elegí el motor **RVC (Applio)**, ajustá y apretá **Procesar** (no se reprocesa solo porque tarda).
+
+## Sliders
+| Slider | Inicial | Qué hace |
+|---|---|---|
+| Transposición | +12 | semitonos; hombre → mujer suele ser +12 (si el modelo ya es agudo, +8 a +10) |
+| Index rate | 0.75 | más = más parecido al timbre del modelo, pero puede sumar artefactos |
+| Protect | 0.33 | más bajo protege más consonantes y respiración |
+
+El post-proceso, el A/B, los presets, el lote y la tecla `V` del Mixer funcionan igual con RVC.
+La duración del resultado se recorta/rellena para que sea **idéntica** a la del original.
+
+## Cómo lo llama VERA
 ```
-La interfaz, el A/B, los presets y el lote funcionan igual con cualquier motor.
-
-## Plan de conexión con Applio
-1. Instalar Applio aparte (tiene su propio Python; no se mezcla con este `.venv`).
-2. En `process()`:
-   - guardar `audio` en un WAV temporal,
-   - ejecutar por línea de comandos, por ejemplo:
-     ```
-     <applio>\env\python.exe <applio>\core.py infer --input_path in.wav --output_path out.wav
-         --pth_path VERA.pth --index_path VERA.index --pitch 12 --index_rate 0.75 --protect 0.33
-     ```
-     (los nombres exactos de las opciones dependen de la versión de Applio: se verifican al conectarlo),
-   - leer `out.wav`, pasarlo a 48 kHz y devolverlo con `match_length(y, len(audio))`.
-3. Agregar en la configuración la ruta de Applio y del modelo, y que `is_available()`
-   devuelva `True` cuando existan.
+<applio>\env\python.exe <applio>\core.py infer --input_path entrada.wav --output_path salida.wav
+    --pth_path VERA.pth --index_path VERA.index --pitch 12 --index_rate 0.75 --protect 0.33
+    --f0_method rmvpe --export_format WAV
+```
+Si tu versión de Applio pide otras opciones, agregalas en **Opciones extra** (por ejemplo
+`--split_audio True`). Si Applio falla, el mensaje de error y el comando exacto quedan en `errores.log`.
 
 ## GPU AMD
-La RX 5500 XT no tiene CUDA. Opciones: Applio por **CPU** (lento pero sirve para lote nocturno),
+La RX 5500 XT no tiene CUDA. Opciones: Applio por **CPU** (lento pero sirve para un lote nocturno),
 DirectML si la versión de Applio lo soporta, o procesar en **Google Colab** y traer los WAV.
-En ese último caso el motor solo copiaría archivos a/desde una carpeta sincronizada.
+Para lotes largos conviene dejar la pestaña **Lote** trabajando con un preset de RVC.
